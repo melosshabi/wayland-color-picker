@@ -29,7 +29,22 @@ static void on_image_click(GtkGestureClick *gesture, int n_press, double x, doub
 
     if (px >= 0 && px < img_w && py >= 0 && py < img_h) {
         guchar *p = pixels + py * stride + px * channels;
-        g_print("COLOR: R=%d G=%d B=%d A=%d", p[0], p[1], p[2], channels == 4 ? p[3]: 255);
+        g_print("COLOR: R=%d G=%d B=%d", p[0], p[1], p[2]);
+        char hex_color[10];
+        if (channels == 4) {
+            snprintf(hex_color, sizeof(hex_color), "%02x%02x%02x%02x", p[0], p[1], p[2], p[3]);
+        }else {
+            snprintf(hex_color, sizeof(hex_color), "%02x%02x%02x", p[0], p[1], p[2]);
+        }
+        GdkDisplay *display = gdk_display_get_default();
+        GdkClipboard *clipboard = gdk_display_get_clipboard(display);
+        gdk_clipboard_set_text(clipboard, hex_color);
+
+        GNotification *notification = g_notification_new("Mela Color Picker");
+        g_notification_set_body(notification, hex_color);
+        GtkWindow *window = gtk_widget_get_root(GTK_WIDGET(pic));
+        g_application_send_notification(G_APPLICATION(gtk_window_get_application(window)), "color-picked", notification);
+        g_object_unref(notification);
     }
     g_object_unref(pixbuf);
 }
@@ -54,10 +69,10 @@ void clip_board_texture_done(GObject *source, GAsyncResult *res, gpointer user_d
 void screenshot_done(GObject *source, GAsyncResult *res, gpointer user_data) {
     GError *error = NULL;  // initialize error to NULL
 
-    // xdp_portal_take_screenshot_finish returns the filename
-    gchar *filename = xdp_portal_take_screenshot_finish(XDP_PORTAL(source), res, &error);
+    // xdp_portal_take_screenshot_finish returns the uri
+    gchar *uri = xdp_portal_take_screenshot_finish(XDP_PORTAL(source), res, &error);
 
-    if (!filename) {
+    if (!uri) {
         if (error) {
             g_printerr("Error during XDP_PORTAL screenshot: %s\n", error->message);
             if (error && g_strcmp0(error->message, "Error during XDP_PORTAL screenshot: Screenshot canceled")) {
@@ -70,17 +85,28 @@ void screenshot_done(GObject *source, GAsyncResult *res, gpointer user_data) {
         return;
     }
 
-    g_print("Screenshot saved at: %s\n", filename);
-    if (g_str_has_prefix(filename, "clipboard://")) {
+    g_print("Screenshot saved at: %s\n", uri);
+    GtkWindow *window = GTK_WINDOW(user_data);
+    GdkDisplay *display = gdk_display_get_default();
+    if (g_str_has_prefix(uri, "clipboard://")) {
         g_print("CLIPBOARD\n");
-        GtkWindow *window = GTK_WINDOW(user_data);
-        GdkDisplay *display = gdk_display_get_default();
         GdkClipboard *clipboard = gdk_display_get_clipboard(display);
         gdk_clipboard_read_texture_async(clipboard, NULL, clip_board_texture_done, window);
+    }else {
+        gchar *local_path = g_filename_from_uri(uri, NULL, NULL);
+        GdkTexture *texture = gdk_texture_new_from_filename(local_path, NULL);
+        if (!texture) return;
+        GtkWidget *pic = gtk_picture_new_for_paintable(GDK_PAINTABLE(texture));
+        g_object_set_data(G_OBJECT(pic), "texture", texture);
+        gtk_window_set_child(window, pic);
+
+        GtkGestureClick *click = gtk_gesture_click_new();
+        g_signal_connect(click, "pressed", G_CALLBACK(on_image_click), pic);
+        gtk_widget_add_controller(pic, GTK_EVENT_CONTROLLER(click));
     }
 
     // Free filename after using it
-    g_free(filename);
+    g_free(uri);
 }
 static void open_screenshot(GtkWidget *widget, gpointer data) {
     XdpPortal *portal = xdp_portal_new();
@@ -92,7 +118,7 @@ static void activate(GtkApplication *app, gpointer user_data) {
 
     window = gtk_application_window_new(app);
     gtk_window_set_title(GTK_WINDOW(window), "Color Picker");
-    gtk_window_set_default_size(GTK_WINDOW(window), 1024, 768);
+    gtk_window_set_default_size(GTK_WINDOW(window), 640, 480);
 
     button = gtk_button_new_with_label("Pick Color");
     gtk_widget_set_halign(GTK_WIDGET(button), GTK_ALIGN_CENTER);
