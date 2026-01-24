@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+    <object class="GtkOverlay" id="help-overlay">
+        <child>
+            <object class="GtkBox" id="help-box">
+                <property name="margin-top">20</property>
+                <property name="orientation">vertical</property>
+                <child>
+                    <object class="GtkLabel" id="how-to-label">
+                        <property name="label">How to use WayPicker</property>
+                        <style>
+                            <class name="help-header"/>
+                        </style>
+                        <property name="margin-top">20</property>
+                        <property name="margin-bottom">20</property>
+                        <property name="wrap">true</property>
+                    </object>
+                </child>
+
+                <!--Step 1-->
+                <child>
+                    <object class="GtkLabel" id="help-label-1">
+                        <property name="label">1. Take a screenshot and it will automatically open inside the app</property>
+                        <property name="margin-top">10</property>
+                        <property name="margin-bottom">10</property>
+                        <property name="wrap">true</property>
+                        <style>
+                            <class name="help-labels"/>
+                        </style>
+                    </object>
+                </child>
+                <!--Step 2-->
+                <child>
+                    <object class="GtkLabel" id="help-label-2">
+                        <property name="label">2. Click anywhere on the image to pick a color</property>
+                        <property name="margin-top">10</property>
+                        <property name="margin-bottom">10</property>
+                        <property name="wrap">true</property>
+                        <style>
+                            <class name="help-labels"/>
+                        </style>
+                    </object>
+                </child>
+                <!--Step 3-->
+                <child>
+                    <object class="GtkLabel" id="help-label-3">
+                        <property name="label">3. To zoom in hold CTRL then scroll up/down to zoom in/out</property>
+                        <property name="margin-top">10</property>
+                        <property name="margin-bottom">10</property>
+                        <property name="wrap">true</property>
+                        <style>
+                            <class name="help-labels"/>
+                        </style>
+                    </object>
+                </child>
+                <!--Step 4-->
+                <child>
+                    <object class="GtkLabel" id="help-label-4">
+                        <property name="label">4. After zooming in you can scroll to other parts of the image, to scroll horizontally hold SHIFT then scroll with your mouse wheel</property>
+                        <property name="margin-top">10</property>
+                        <property name="margin-bottom">10</property>
+                        <property name="wrap">true</property>
+                        <style>
+                            <class name="help-labels"/>
+                        </style>
+                    </object>
+                </child>
+            </object>
+        </child>
+
+        <child type="overlay">
+            <object class="GtkButton" id="backButton">
+                <property name="label">Back</property>
+                <property name="margin-top">10</property>
+                <property name="margin-start">10</property>
+                <property name="halign">start</property>
+                <property name="valign">start</property>
+            </object>
+        </child>
+    </object>
+</interface>

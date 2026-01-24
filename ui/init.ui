@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+    <object class="GtkApplicationWindow" id="main_window">
+        <property name="default_width">400</property>
+        <property name="default_height">300</property>
+
+        <child>
+            <object class="GtkStack" id="stack">
+            <child>
+                   <object class="GtkStackPage">
+                       <property name="name">home</property>
+                       <property name="child">
+                           <object class="GtkCenterBox" id="home">
+                               <!-- Pick color button -->
+                               <child type="center">
+                                   <object class="GtkButton" id="pick_color_button">
+                                       <property name="label">Pick Color</property>
+                                       <property name="valign">center</property>
+                                       <property name="halign">center</property>
+                                   </object>
+                               </child>
+                               <!-- Help button -->
+                               <child type="end">
+                                   <object class="GtkButton" id="help_button">
+                                       <property name="label">?</property>
+                                       <property name="valign">end</property>
+                                       <property name="halign">end</property>
+                                       <property name="margin_end">10</property>
+                                       <property name="margin_bottom">20</property>
+                                   </object>
+                               </child>
+                           </object>
+                       </property>
+                   </object>
+               </child>
+            </object>
+        </child>
+    </object>
+</interface>

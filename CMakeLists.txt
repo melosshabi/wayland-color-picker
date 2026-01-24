@@ -1,28 +1,36 @@
-cmake_minimum_required(VERSION 4.0)
-project(WayPicker C)
+cmake_minimum_required(VERSION 3.16)
+
+project(WayPicker LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 find_package(PkgConfig REQUIRED)
 
-# --- GTK4 ---
-pkg_check_modules(GTK4 REQUIRED gtk4)
-include_directories(${GTK4_INCLUDE_DIRS})
-link_directories(${GTK4_LIBRARY_DIRS})
-add_definitions(${GTK4_CFLAGS_OTHER})
+# GTK4
+pkg_check_modules(GTK4 REQUIRED IMPORTED_TARGET gtk4)
 
-# --- libportal-gtk4 ---
-pkg_check_modules(PORTAL REQUIRED libportal-gtk4)
-include_directories(${PORTAL_INCLUDE_DIRS})
-link_directories(${PORTAL_LIBRARY_DIRS})
-add_definitions(${PORTAL_CFLAGS_OTHER})
+# libportal-gtk4
+pkg_check_modules(PORTAL REQUIRED IMPORTED_TARGET libportal-gtk4)
 
-# --- Build executable ---
-add_executable(WayPicker main.c)
+add_executable(WayPicker
+    main.c
+)
 
-# Link both GTK4 and portal libraries
-target_link_libraries(WayPicker ${GTK4_LIBRARIES} ${PORTAL_LIBRARIES})
+target_link_libraries(WayPicker
+    PRIVATE
+        PkgConfig::GTK4
+        PkgConfig::PORTAL
+)
 
-add_custom_command(TARGET WayPicker POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        ${CMAKE_SOURCE_DIR}/styles.css
-        $<TARGET_FILE_DIR:WayPicker>/styles.css)
+# Copy runtime files
+add_custom_command(
+    TARGET WayPicker POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_SOURCE_DIR}/styles.css
+            $<TARGET_FILE_DIR:WayPicker>/styles.css
+)
+
+file(COPY ${CMAKE_SOURCE_DIR}/ui
+     DESTINATION ${CMAKE_BINARY_DIR})
