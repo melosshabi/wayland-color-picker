@@ -1,4 +1,6 @@
 #include <gio/gio.h>
+#include <glib.h>
+#include <inttypes.h>
 #include <stdio.h>
 #include <gtk/gtk.h>
 #include <libportal/portal.h>
@@ -50,21 +52,51 @@ static gboolean on_scroll(GtkEventControllerScroll *controller, double dx, doubl
     }
     return FALSE;
 }
-static void show_toast(GtkWidget *pic, const char *message) {
-    GtkWidget *toast = gtk_label_new(message);
-    // gtk_widget_add_css_class(toast, "toast");
+static gboolean destroy_toast(gpointer data){
+    GtkWidget *toast = data;
+    if(!GTK_IS_WIDGET(toast)){
+        return G_SOURCE_REMOVE;
+    }
+    GtkWidget *pic = g_object_get_data(G_OBJECT(toast), "picture");
+    if(pic){
+        g_object_set_data(G_OBJECT(pic), "active-toast", NULL);
+    }
+    GtkWidget *parent = gtk_widget_get_parent(toast);
+    if(parent && GTK_IS_OVERLAY(parent)){
+        gtk_overlay_remove_overlay(GTK_OVERLAY(parent), toast);
+    }
+    return G_SOURCE_REMOVE;
+}
+static void show_toast(GtkPicture *pic, const char *message) {
+
+    // Remove the old toast if it exists
+    GtkWidget *oldToast = g_object_get_data(G_OBJECT(pic), "active-toast");
+    if(oldToast && GTK_IS_WIDGET(oldToast)){
+        GtkWidget *parent = gtk_widget_get_parent(oldToast);
+        if(parent && GTK_IS_OVERLAY(parent)){
+            gtk_overlay_remove_overlay(GTK_OVERLAY(parent), oldToast);
+        }
+    }
+
+    GtkWidget *toast = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
+    gtk_widget_add_css_class(toast, "toast");
     gtk_widget_set_valign(toast, GTK_ALIGN_END);
     gtk_widget_set_halign(toast, GTK_ALIGN_END);
     gtk_widget_set_margin_end(toast, 20);
     gtk_widget_set_margin_bottom(toast, 20);
-
-    GtkWidget *scrolled = gtk_widget_get_parent(pic);
+    GtkWidget *label = gtk_label_new(message);
+    gtk_box_append(GTK_BOX(toast), label);
+    // GtkScrolledWindow automatically wraps its child in a GtkViewport
+    GtkWidget *viewport = gtk_widget_get_parent(GTK_WIDGET(pic));
+    GtkWidget *scrolled = gtk_widget_get_parent(viewport);
     GtkWidget *overlay = gtk_widget_get_parent(scrolled);
     gtk_overlay_add_overlay(GTK_OVERLAY(overlay), toast);
-
+    g_object_set_data(G_OBJECT(toast), "picture", pic);
+    g_object_set_data(G_OBJECT(pic), "active-toast", NULL);
+    g_object_set_data(G_OBJECT(pic), "active-toast", toast);
     gtk_widget_set_visible(toast, TRUE);
 
-    // g_timeout_add(2000, (GSourceFunc)gtk_widget_destroy, toast);
+    g_timeout_add(2000, (GSourceFunc)destroy_toast, toast);
 }
 static void on_image_click(GtkGestureClick *gesture, int n_press, double x, double y, gpointer user_data) {
     ImageClickData *data = user_data;
@@ -93,23 +125,14 @@ static void on_image_click(GtkGestureClick *gesture, int n_press, double x, doub
     if (px >= 0 && px < img_w && py >= 0 && py < img_h) {
         guchar *p = pixels + py * stride + px * channels;
         char hex_color[10];
-        if (channels == 4) {
-            snprintf(hex_color, sizeof(hex_color), "#%02x%02x%02x%02x", p[0], p[1], p[2], p[3]);
-        }else {
-            snprintf(hex_color, sizeof(hex_color), "#%02x%02x%02x", p[0], p[1], p[2]);
-        }
+        snprintf(hex_color, sizeof(hex_color), "#%02x%02x%02x", p[0], p[1], p[2]);
         GdkDisplay *display = gdk_display_get_default();
         GdkClipboard *clipboard = gdk_display_get_clipboard(display);
         gdk_clipboard_set_text(clipboard, hex_color);
-
-        // GNotification *notification = g_notification_new("Mela Color Picker");
-        // g_notification_set_body(notification, hex_color);
-        // GtkWindow *window = GTK_WINDOW(gtk_widget_get_root(GTK_WIDGET(pic)));
-        // g_application_send_notification(G_APPLICATION(gtk_window_get_application(window)), "color-picked", notification);
-        // g_object_unref(notification);
+        gchar *combined = g_strconcat("Copied: ", hex_color, NULL);
+        show_toast(pic, combined);
     }
     AppState *state = data->state;
-    show_toast(pic, "Image clicked");
     g_object_unref(pixbuf);
 }
 void clip_board_texture_done(GObject *source, GAsyncResult *res, gpointer user_data) {
@@ -181,7 +204,12 @@ void clip_board_texture_done(GObject *source, GAsyncResult *res, gpointer user_d
     gtk_stack_add_named(GTK_STACK(state->stack), overlay, "image");
     gtk_stack_set_visible_child_name(GTK_STACK(state->stack), "image");
 }
-
+gboolean read_clipboard(gpointer goBackData){
+    GdkDisplay *display = gdk_display_get_default();
+    GdkClipboard *clipboard = gdk_display_get_clipboard(display);
+    gdk_clipboard_read_texture_async(clipboard, NULL, clip_board_texture_done, goBackData);
+    return G_SOURCE_REMOVE;
+}
 void screenshot_done(GObject *source, GAsyncResult *res, gpointer user_data) {
     GError *error = NULL;
 
@@ -205,9 +233,7 @@ void screenshot_done(GObject *source, GAsyncResult *res, gpointer user_data) {
     appData ->state = state;
     appData ->prevRoute = IMAGE;
     if (g_str_has_prefix(uri, "clipboard://")) {
-        GdkDisplay *display = gdk_display_get_default();
-        GdkClipboard *clipboard = gdk_display_get_clipboard(display);
-        gdk_clipboard_read_texture_async(clipboard, NULL, clip_board_texture_done, appData);
+        g_timeout_add(200, (GSourceFunc)read_clipboard, appData);
     }else {
         gchar *local_path = g_filename_from_uri(uri, NULL, NULL);
         GdkTexture *texture = gdk_texture_new_from_filename(local_path, NULL);
