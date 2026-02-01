@@ -4,28 +4,8 @@
 #include <stdio.h>
 #include <gtk/gtk.h>
 #include <libportal/portal.h>
+#include "structs.h"
 
-typedef struct {
-    double scale;
-} ZoomState;
-
-typedef struct {
-    GtkWidget *window;
-    GtkWidget *stack;
-} AppState;
-
-enum ROUTES {
-    IMAGE,
-    HELP
-};
-typedef struct {
-    enum ROUTES prevRoute;
-    AppState *state;
-}GoBackData;
-typedef struct {
-    GtkWidget *pic;
-    AppState *state;
-}ImageClickData;
 static void go_back(GtkButton *button, gpointer user_data);
 static void update_picture_scale(GtkWidget *pic, double scale) {
     int orig_w = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(pic), "orig-width"));
@@ -58,8 +38,11 @@ static gboolean destroy_toast(gpointer data){
         return G_SOURCE_REMOVE;
     }
     GtkWidget *pic = g_object_get_data(G_OBJECT(toast), "picture");
-    if(pic){
-        g_object_set_data(G_OBJECT(pic), "active-toast", NULL);
+    if(pic && GTK_IS_WIDGET(pic)){
+        GtkWidget *current_toast = g_object_get_data(G_OBJECT(pic), "active-toast");
+        if(current_toast == toast){
+         g_object_set_data(G_OBJECT(pic), "active-toast", NULL);
+        }
     }
     GtkWidget *parent = gtk_widget_get_parent(toast);
     if(parent && GTK_IS_OVERLAY(parent)){
@@ -68,16 +51,19 @@ static gboolean destroy_toast(gpointer data){
     return G_SOURCE_REMOVE;
 }
 static void show_toast(GtkPicture *pic, const char *message) {
-
     // Remove the old toast if it exists
     GtkWidget *oldToast = g_object_get_data(G_OBJECT(pic), "active-toast");
     if(oldToast && GTK_IS_WIDGET(oldToast)){
+        guint timeout_id = GPOINTER_TO_UINT(g_object_get_data(G_OBJECT(oldToast), "timeout-id"));
+        if(timeout_id > 0){
+            g_source_remove(timeout_id);
+        }
         GtkWidget *parent = gtk_widget_get_parent(oldToast);
         if(parent && GTK_IS_OVERLAY(parent)){
             gtk_overlay_remove_overlay(GTK_OVERLAY(parent), oldToast);
         }
+        g_object_set_data(G_OBJECT(pic), "active-toast", NULL);
     }
-
     GtkWidget *toast = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
     gtk_widget_add_css_class(toast, "toast");
     gtk_widget_set_valign(toast, GTK_ALIGN_END);
@@ -96,7 +82,8 @@ static void show_toast(GtkPicture *pic, const char *message) {
     g_object_set_data(G_OBJECT(pic), "active-toast", toast);
     gtk_widget_set_visible(toast, TRUE);
 
-    g_timeout_add(2000, (GSourceFunc)destroy_toast, toast);
+    guint timeout_id = g_timeout_add(2000, (GSourceFunc)destroy_toast, toast);
+    g_object_set_data(G_OBJECT(toast), "timeout-id", GUINT_TO_POINTER(timeout_id));
 }
 static void on_image_click(GtkGestureClick *gesture, int n_press, double x, double y, gpointer user_data) {
     ImageClickData *data = user_data;
@@ -131,6 +118,7 @@ static void on_image_click(GtkGestureClick *gesture, int n_press, double x, doub
         gdk_clipboard_set_text(clipboard, hex_color);
         gchar *combined = g_strconcat("Copied: ", hex_color, NULL);
         show_toast(pic, combined);
+        g_free(combined);
     }
     AppState *state = data->state;
     g_object_unref(pixbuf);
@@ -210,6 +198,60 @@ gboolean read_clipboard(gpointer goBackData){
     gdk_clipboard_read_texture_async(clipboard, NULL, clip_board_texture_done, goBackData);
     return G_SOURCE_REMOVE;
 }
+void load_image_from_uri(gchar *uri, AppState *state, GoBackData *goBackData){
+    gchar *local_path = g_filename_from_uri(uri, NULL, NULL);
+    GdkTexture *texture = gdk_texture_new_from_filename(local_path, NULL);
+    if (!texture) return;
+    int w = gdk_texture_get_width(texture);
+    int h = gdk_texture_get_height(texture);
+    GtkWidget *pic = gtk_picture_new_for_paintable(GDK_PAINTABLE(texture));
+    g_object_set_data(G_OBJECT(pic), "texture", texture);
+    g_object_set_data(G_OBJECT(pic), "orig-width", GINT_TO_POINTER(w));
+    g_object_set_data(G_OBJECT(pic), "orig-height", GINT_TO_POINTER(h));
+    // Scroll controller (zoom)
+    ZoomState *zoom = g_new0(ZoomState, 1);
+    zoom->scale = 1.0;
+    g_object_set_data_full(G_OBJECT(pic), "zoom", zoom, g_free);
+
+    GtkEventController *scroll =
+        gtk_event_controller_scroll_new(GTK_EVENT_CONTROLLER_SCROLL_VERTICAL);
+    g_signal_connect(scroll, "scroll", G_CALLBACK(on_scroll), zoom);
+    gtk_widget_add_controller(pic, scroll);
+
+    ImageClickData *imageData = g_malloc(sizeof(ImageClickData));
+    imageData->pic = pic;
+    imageData->state = state;
+    // Click controller
+    GtkGesture *click = gtk_gesture_click_new();
+    g_signal_connect(click, "pressed", G_CALLBACK(on_image_click), imageData);
+    gtk_widget_add_controller(pic, GTK_EVENT_CONTROLLER(click));
+
+    // Scrolled window
+    GtkWidget *scrolled = gtk_scrolled_window_new();
+    gtk_scrolled_window_set_policy(
+        GTK_SCROLLED_WINDOW(scrolled),
+        GTK_POLICY_ALWAYS,
+        GTK_POLICY_ALWAYS);
+
+    gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled), pic);
+
+    // Overlay
+    GtkWidget *overlay = gtk_overlay_new();
+    gtk_overlay_set_child(GTK_OVERLAY(overlay), scrolled);
+
+    // Back button
+    GtkWidget *backButton = gtk_button_new_with_label("Back");
+    gtk_widget_set_halign(backButton, GTK_ALIGN_START);
+    gtk_widget_set_valign(backButton, GTK_ALIGN_START);
+    gtk_widget_set_margin_top(backButton, 10);
+    gtk_widget_set_margin_start(backButton, 10);
+    g_signal_connect(backButton, "clicked", G_CALLBACK(go_back), goBackData);
+
+    gtk_overlay_add_overlay(GTK_OVERLAY(overlay), backButton);
+
+    gtk_stack_add_named(GTK_STACK(state->stack), overlay, "image");
+    gtk_stack_set_visible_child_name(GTK_STACK(state->stack), "image");
+}
 void screenshot_done(GObject *source, GAsyncResult *res, gpointer user_data) {
     GError *error = NULL;
 
@@ -229,64 +271,13 @@ void screenshot_done(GObject *source, GAsyncResult *res, gpointer user_data) {
     }
 
     AppState *state = user_data;
-    GoBackData *appData = g_malloc(sizeof(GoBackData));
-    appData ->state = state;
-    appData ->prevRoute = IMAGE;
+    GoBackData *goBackData = g_malloc(sizeof(GoBackData));
+    goBackData ->state = state;
+    goBackData ->prevRoute = IMAGE;
     if (g_str_has_prefix(uri, "clipboard://")) {
-        g_timeout_add(200, (GSourceFunc)read_clipboard, appData);
+        g_timeout_add(200, (GSourceFunc)read_clipboard, goBackData);
     }else {
-        gchar *local_path = g_filename_from_uri(uri, NULL, NULL);
-        GdkTexture *texture = gdk_texture_new_from_filename(local_path, NULL);
-        if (!texture) return;
-        int w = gdk_texture_get_width(texture);
-        int h = gdk_texture_get_height(texture);
-        GtkWidget *pic = gtk_picture_new_for_paintable(GDK_PAINTABLE(texture));
-        g_object_set_data(G_OBJECT(pic), "texture", texture);
-        g_object_set_data(G_OBJECT(pic), "orig-width", GINT_TO_POINTER(w));
-        g_object_set_data(G_OBJECT(pic), "orig-height", GINT_TO_POINTER(h));
-        // Scroll controller (zoom)
-        ZoomState *zoom = g_new0(ZoomState, 1);
-        zoom->scale = 1.0;
-        g_object_set_data_full(G_OBJECT(pic), "zoom", zoom, g_free);
-
-        GtkEventController *scroll =
-            gtk_event_controller_scroll_new(GTK_EVENT_CONTROLLER_SCROLL_VERTICAL);
-        g_signal_connect(scroll, "scroll", G_CALLBACK(on_scroll), zoom);
-        gtk_widget_add_controller(pic, scroll);
-
-        ImageClickData *imageData = g_malloc(sizeof(ImageClickData));
-        imageData->pic = pic;
-        imageData->state = state;
-        // Click controller
-        GtkGesture *click = gtk_gesture_click_new();
-        g_signal_connect(click, "pressed", G_CALLBACK(on_image_click), imageData);
-        gtk_widget_add_controller(pic, GTK_EVENT_CONTROLLER(click));
-
-        // Scrolled window
-        GtkWidget *scrolled = gtk_scrolled_window_new();
-        gtk_scrolled_window_set_policy(
-            GTK_SCROLLED_WINDOW(scrolled),
-            GTK_POLICY_ALWAYS,
-            GTK_POLICY_ALWAYS);
-
-        gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled), pic);
-
-        // Overlay
-        GtkWidget *overlay = gtk_overlay_new();
-        gtk_overlay_set_child(GTK_OVERLAY(overlay), scrolled);
-
-        // Back button
-        GtkWidget *backButton = gtk_button_new_with_label("Back");
-        gtk_widget_set_halign(backButton, GTK_ALIGN_START);
-        gtk_widget_set_valign(backButton, GTK_ALIGN_START);
-        gtk_widget_set_margin_top(backButton, 10);
-        gtk_widget_set_margin_start(backButton, 10);
-        g_signal_connect(backButton, "clicked", G_CALLBACK(go_back), appData);
-
-        gtk_overlay_add_overlay(GTK_OVERLAY(overlay), backButton);
-
-        gtk_stack_add_named(GTK_STACK(state->stack), overlay, "image");
-        gtk_stack_set_visible_child_name(GTK_STACK(state->stack), "image");
+        load_image_from_uri(uri, state, goBackData);
     }
 
     // Free filename after using it
@@ -324,7 +315,52 @@ static void go_back(GtkButton *button, gpointer data) {
     gtk_stack_set_visible_child_name(GTK_STACK(state->stack), "home");
     // g_free(data);
 }
+void on_image_selected(GObject *source, GAsyncResult *result, gpointer user_data){
+    GtkFileDialog *dialog = GTK_FILE_DIALOG(source);
+    GError *error = NULL;
 
+    GFile *file = gtk_file_dialog_open_finish(dialog, result, &error);
+    if(!file){
+        if(error && !g_error_matches(error, GTK_DIALOG_ERROR, GTK_DIALOG_ERROR_DISMISSED)){
+            g_printerr("Error opening file: %s\n", error->message);
+        }
+        g_clear_error(&error);
+        return;
+    }
+    gchar *uri = g_file_get_uri(file);
+    g_print("Selected URI %s\n", uri);
+    LoadImageData *loadData = user_data;
+    load_image_from_uri(uri, loadData->state, loadData->goBackData);
+    g_free(uri);
+    g_object_unref(file);
+}
+void open_file_explorer(GtkWidget *button, gpointer data){
+    AppState *state = data;
+    GoBackData *goBackData = g_malloc(sizeof(GoBackData));
+    goBackData ->state = state;
+    goBackData ->prevRoute = IMAGE;
+
+    GtkFileDialog *dialog = gtk_file_dialog_new();
+    gtk_file_dialog_set_title(dialog, "Select an Image");
+
+    GtkFileFilter *fileFilter = gtk_file_filter_new();
+    gtk_file_filter_set_name(fileFilter, "Image Files");
+    gtk_file_filter_add_mime_type(fileFilter, "image/png");
+    gtk_file_filter_add_mime_type(fileFilter, "image/jpeg");
+    gtk_file_filter_add_mime_type(fileFilter, "image/jpg");
+
+    GListStore *filters = g_list_store_new(GTK_TYPE_FILE_FILTER);
+    g_list_store_append(filters, fileFilter);
+    gtk_file_dialog_set_filters(dialog, G_LIST_MODEL(filters));
+
+    LoadImageData *loadData = g_malloc(sizeof(LoadImageData));
+    loadData->state = state;
+    loadData->goBackData = goBackData;
+
+    gtk_file_dialog_open(dialog, GTK_WINDOW(state->window), NULL, on_image_selected, loadData);
+    g_object_unref(fileFilter);
+    g_object_unref(filters);
+}
 static void activate(GtkApplication *app, gpointer user_data) {
     GtkCssProvider *cssprovider = gtk_css_provider_new();
     GFile *css_file = g_file_new_for_path("styles.css");
@@ -350,6 +386,7 @@ static void activate(GtkApplication *app, gpointer user_data) {
     GtkWidget *stack = GTK_WIDGET(gtk_builder_get_object(builder, "stack"));
     state->stack = stack;
     g_signal_connect(gtk_builder_get_object(builder, "pick_color_button"), "clicked", G_CALLBACK(open_screenshot), state);
+    g_signal_connect(gtk_builder_get_object(builder, "load_image_button"), "clicked", G_CALLBACK(open_file_explorer), state);
     g_signal_connect(gtk_builder_get_object(builder, "help_button"), "clicked", G_CALLBACK(show_help), state);
     gtk_window_set_application(GTK_WINDOW(state->window), app);
     gtk_window_present(GTK_WINDOW(state->window));

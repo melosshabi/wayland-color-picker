@@ -3,36 +3,51 @@
     <object class="GtkApplicationWindow" id="main_window">
         <property name="default_width">400</property>
         <property name="default_height">300</property>
-
         <child>
             <object class="GtkStack" id="stack">
-            <child>
-                   <object class="GtkStackPage">
-                       <property name="name">home</property>
-                       <property name="child">
-                           <object class="GtkCenterBox" id="home">
-                               <!-- Pick color button -->
-                               <child type="center">
-                                   <object class="GtkButton" id="pick_color_button">
-                                       <property name="label">Pick Color</property>
-                                       <property name="valign">center</property>
-                                       <property name="halign">center</property>
-                                   </object>
-                               </child>
-                               <!-- Help button -->
-                               <child type="end">
-                                   <object class="GtkButton" id="help_button">
-                                       <property name="label">?</property>
-                                       <property name="valign">end</property>
-                                       <property name="halign">end</property>
-                                       <property name="margin_end">10</property>
-                                       <property name="margin_bottom">20</property>
-                                   </object>
-                               </child>
-                           </object>
-                       </property>
-                   </object>
-               </child>
+                <child>
+                    <object class="GtkStackPage">
+                        <property name="name">home</property>
+                        <property name="child">
+                            <object class="GtkOverlay" id="home">
+                                <!-- Main centered buttons -->
+                                <property name="child">
+                                    <object class="GtkBox">
+                                        <property name="orientation">vertical</property>
+                                        <property name="spacing">10</property>
+                                        <property name="valign">center</property>
+                                        <property name="halign">center</property>
+
+                                        <!-- Pick color button -->
+                                        <child>
+                                            <object class="GtkButton" id="pick_color_button">
+                                                <property name="label">Pick Color</property>
+                                            </object>
+                                        </child>
+
+                                        <!-- Load image button -->
+                                        <child>
+                                            <object class="GtkButton" id="load_image_button">
+                                                <property name="label">Load Image</property>
+                                            </object>
+                                        </child>
+                                    </object>
+                                </property>
+
+                                <!-- Help button overlaid at bottom-right -->
+                                <child type="overlay">
+                                    <object class="GtkButton" id="help_button">
+                                        <property name="label">?</property>
+                                        <property name="valign">end</property>
+                                        <property name="halign">end</property>
+                                        <property name="margin-end">10</property>
+                                        <property name="margin-bottom">20</property>
+                                    </object>
+                                </child>
+                            </object>
+                        </property>
+                    </object>
+                </child>
             </object>
         </child>
     </object>
