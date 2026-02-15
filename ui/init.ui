@@ -31,6 +31,44 @@
                                                 <property name="label">Load Image</property>
                                             </object>
                                         </child>
+
+                                        <!-- Separator -->
+                                        <child>
+                                            <object class="GtkSeparator">
+                                                <property name="margin-top">10</property>
+                                                <property name="margin-bottom">10</property>
+                                            </object>
+                                        </child>
+
+                                        <!-- Color history scroll view -->
+                                        <child>
+                                            <object class="GtkLabel">
+                                                <property name="label"> Color history</property>
+                                                <property name="halign">center</property>
+                                                <property name="margin-bottom">5</property>
+                                                <style>
+                                                    <class name="color-title"/>
+                                                </style>
+                                            </object>
+                                        </child>
+
+                                        <child>
+                                            <object class="GtkScrolledWindow">
+                                                <property name="vexpand">true</property>
+                                                <property name="hscrollbar-policy">automatic</property>
+                                                <property name="vscrollbar-policy">automatic</property>
+                                                <property name="min-content-height">200</property>
+                                                <child>
+                                                    <object class="GtkBox" id="history_container">
+                                                        <property name="orientation">vertical</property>
+                                                        <property name="spacing">5</property>
+                                                    </object>
+                                                </child>
+                                            </object>
+                                        </child>
+                                        <style>
+                                            <class name="color-list"/>
+                                        </style>
                                     </object>
                                 </property>
 

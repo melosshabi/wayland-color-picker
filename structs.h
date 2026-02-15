@@ -7,6 +7,7 @@ typedef struct {
 typedef struct {
     GtkWidget *window;
     GtkWidget *stack;
+    GtkWidget *history_container;
 } AppState;
 
 enum ROUTES {
@@ -23,6 +24,7 @@ typedef struct {
     GtkWidget *pic;
     AppState *state;
 }ImageClickData;
+
 typedef struct{
     gchar uri;
     AppState *state;

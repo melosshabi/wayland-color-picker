@@ -1,12 +1,18 @@
+#include <gdk/gdk.h>
 #include <gio/gio.h>
+#include <glib-object.h>
 #include <glib.h>
+#include <gtk/gtkcssprovider.h>
 #include <inttypes.h>
 #include <stdio.h>
 #include <gtk/gtk.h>
 #include <libportal/portal.h>
 #include "structs.h"
+#include "resources.h"
+#include "color_history.h"
 
 static void go_back(GtkButton *button, gpointer user_data);
+static void populate_color_history(GtkBox *container);
 static void update_picture_scale(GtkWidget *pic, double scale) {
     int orig_w = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(pic), "orig-width"));
     int orig_h = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(pic), "orig-height"));
@@ -93,21 +99,25 @@ static void on_image_click(GtkGestureClick *gesture, int n_press, double x, doub
     int img_w = gdk_paintable_get_intrinsic_width(paintable);
     int img_h = gdk_paintable_get_intrinsic_height(paintable);
 
-    GtkAllocation alloc;
-    gtk_widget_get_allocation(GTK_WIDGET(pic), &alloc);
-    double scale_x = (double)img_w / alloc.width;
-    double scale_y = (double)img_h / alloc.height;
+    // GtkAllocation alloc;
+    // gtk_widget_get_alocation(GTK_WIDGET(pic), &alloc);
+    graphene_rect_t bounds;
+    if (!gtk_widget_compute_bounds(GTK_WIDGET(pic), GTK_WIDGET(pic), &bounds)) {
+        // Fallback if it somehow fails
+        return;
+    }
+    double scale_x = (double)img_w / bounds.size.width;
+    double scale_y = (double)img_h / bounds.size.height;
 
     int px = (int)(x * scale_x);
     int py = (int)(y * scale_y);
 
     GdkTexture *texture = g_object_get_data(G_OBJECT(pic), "texture");
     if (!texture) return;
-    GdkPixbuf *pixbuf = gdk_pixbuf_get_from_texture(texture);
-    if (!pixbuf) return;
-    int channels = gdk_pixbuf_get_n_channels(pixbuf);
-    int stride = gdk_pixbuf_get_rowstride(pixbuf);
-    guchar *pixels = gdk_pixbuf_get_pixels(pixbuf);
+    int channels = 4; // gdk_texture_download always uses RGBA
+    int stride = img_w * channels;
+    guchar *pixels = g_malloc(img_h * stride);
+    gdk_texture_download(texture, pixels, stride);
 
     if (px >= 0 && px < img_w && py >= 0 && py < img_h) {
         guchar *p = pixels + py * stride + px * channels;
@@ -119,9 +129,10 @@ static void on_image_click(GtkGestureClick *gesture, int n_press, double x, doub
         gchar *combined = g_strconcat("Copied: ", hex_color, NULL);
         show_toast(pic, combined);
         g_free(combined);
+        save_color_to_history(hex_color);
     }
     AppState *state = data->state;
-    g_object_unref(pixbuf);
+    g_free(pixels);
 }
 void clip_board_texture_done(GObject *source, GAsyncResult *res, gpointer user_data) {
     GError *error = NULL;
@@ -289,7 +300,7 @@ static void open_screenshot(GtkWidget *widget, gpointer data) {
 }
 static void show_help(GtkButton *button, gpointer data) {
     AppState *state = data;
-    GtkBuilder *builder = gtk_builder_new_from_file("ui/help.ui");
+    GtkBuilder *builder = gtk_builder_new_from_resource("/com/waypicker/ui/help.ui");
     GtkButton *backButton = GTK_BUTTON(gtk_builder_get_object(builder, "backButton"));
     GoBackData *appData = g_malloc(sizeof(GoBackData));
     appData->state = state;
@@ -313,7 +324,9 @@ static void go_back(GtkButton *button, gpointer data) {
         gtk_stack_remove(GTK_STACK(state->stack), helpStack);
     }
     gtk_stack_set_visible_child_name(GTK_STACK(state->stack), "home");
-    // g_free(data);
+    if(state->history_container){
+        populate_color_history(GTK_BOX(state->history_container));
+    }
 }
 void on_image_selected(GObject *source, GAsyncResult *result, gpointer user_data){
     GtkFileDialog *dialog = GTK_FILE_DIALOG(source);
@@ -328,7 +341,6 @@ void on_image_selected(GObject *source, GAsyncResult *result, gpointer user_data
         return;
     }
     gchar *uri = g_file_get_uri(file);
-    g_print("Selected URI %s\n", uri);
     LoadImageData *loadData = user_data;
     load_image_from_uri(uri, loadData->state, loadData->goBackData);
     g_free(uri);
@@ -361,10 +373,79 @@ void open_file_explorer(GtkWidget *button, gpointer data){
     g_object_unref(fileFilter);
     g_object_unref(filters);
 }
+static void on_history_color_click(GtkButton *button, gpointer user_data){
+    gchar *color_hex = user_data;
+
+    GdkDisplay *display = gdk_display_get_default();
+    GdkClipboard *clipboard = gdk_display_get_clipboard(display);
+    gdk_clipboard_set_text(clipboard, color_hex);
+
+}
+static void draw_color_box(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user_data){
+    GdkRGBA *color = user_data;
+    gdk_cairo_set_source_rgba(cr, color);
+    cairo_rectangle(cr, 0, 0, width, height);
+    cairo_fill(cr);
+}
+static void populate_color_history(GtkBox *container){
+    GtkWidget *child;
+    // If there are any children inside the container remove them
+    while((child = gtk_widget_get_first_child(GTK_WIDGET(container))) != NULL){
+        gtk_box_remove(container, child);
+    }
+
+    GList *history = load_color_history();
+    if(history == NULL){
+        GtkWidget *label = gtk_label_new("No color history yet.");
+        gtk_widget_set_opacity(label, 0.5);
+        gtk_box_append(container, label);
+        return;
+    }
+
+    for(GList *l = history; l != NULL; l = l->next){
+        ColorEntry *entry = l -> data;
+
+        GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+        gtk_widget_set_margin_start(row, 5);
+        gtk_widget_set_margin_end(row, 5);
+
+        // Color preview box
+        GtkWidget *color_box = gtk_drawing_area_new();
+        gtk_widget_set_size_request(color_box, 40, 40);
+
+        GdkRGBA rgba;
+        gdk_rgba_parse(&rgba, entry->hex_color);
+
+        gtk_drawing_area_set_draw_func(
+            GTK_DRAWING_AREA(color_box),
+            (GtkDrawingAreaDrawFunc)draw_color_box,
+            gdk_rgba_copy(&rgba),
+            (GDestroyNotify)gdk_rgba_free
+        );
+        // Hex Label
+        GtkWidget *label = gtk_label_new(entry->hex_color);
+        gtk_widget_set_hexpand(label, TRUE);
+        gtk_widget_set_halign(label, GTK_ALIGN_START);
+
+        GtkWidget *copy_btn = gtk_button_new_with_label("Copy");
+        gchar *color_copy = g_strdup(entry->hex_color);
+
+        g_signal_connect(copy_btn, "clicked", G_CALLBACK(on_history_color_click), color_copy);
+        g_object_weak_ref(G_OBJECT(copy_btn), (GWeakNotify)g_free, color_copy);
+
+        gtk_box_append(GTK_BOX(row), color_box);
+        gtk_box_append(GTK_BOX(row), label);
+        gtk_box_append(GTK_BOX(row), copy_btn);
+
+        gtk_box_append(container, row);
+    }
+    free_color_history(history);
+}
 static void activate(GtkApplication *app, gpointer user_data) {
+    GResource *resource = resources_get_resource();
+    g_resources_register(resource);
     GtkCssProvider *cssprovider = gtk_css_provider_new();
-    GFile *css_file = g_file_new_for_path("styles.css");
-    gtk_css_provider_load_from_file(cssprovider, css_file);
+    gtk_css_provider_load_from_resource(cssprovider, "/com/waypicker/styles.css");
     gtk_style_context_add_provider_for_display(
         gdk_display_get_default(),
         GTK_STYLE_PROVIDER(cssprovider),
@@ -374,7 +455,7 @@ static void activate(GtkApplication *app, gpointer user_data) {
 
     AppState *state = g_new0(AppState, 1);
     GError *error = NULL;
-    GtkBuilder *builder = gtk_builder_new_from_file("ui/init.ui");
+    GtkBuilder *builder = gtk_builder_new_from_resource("/com/waypicker/ui/init.ui");
     if (!builder) {
         g_printerr("Failed to load UI: %s\n", error->message);
         g_clear_error(&error);
@@ -385,9 +466,15 @@ static void activate(GtkApplication *app, gpointer user_data) {
     GtkWidget *home = GTK_WIDGET(gtk_builder_get_object(builder, "home"));
     GtkWidget *stack = GTK_WIDGET(gtk_builder_get_object(builder, "stack"));
     state->stack = stack;
+
+    GtkBox *history_container = GTK_BOX(gtk_builder_get_object(builder, "history_container"));
+    state->history_container = GTK_WIDGET(history_container);
+    populate_color_history(history_container);
+
     g_signal_connect(gtk_builder_get_object(builder, "pick_color_button"), "clicked", G_CALLBACK(open_screenshot), state);
     g_signal_connect(gtk_builder_get_object(builder, "load_image_button"), "clicked", G_CALLBACK(open_file_explorer), state);
     g_signal_connect(gtk_builder_get_object(builder, "help_button"), "clicked", G_CALLBACK(show_help), state);
+
     gtk_window_set_application(GTK_WINDOW(state->window), app);
     gtk_window_present(GTK_WINDOW(state->window));
 }

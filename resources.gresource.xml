@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gresources>
+    <gresource prefix="/com/waypicker">
+        <file>ui/init.ui</file>
+        <file>ui/help.ui</file>
+        <file>styles.css</file>
+    </gresource>
+</gresources>
