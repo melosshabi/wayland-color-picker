@@ -99,19 +99,23 @@ static void on_image_click(GtkGestureClick *gesture, int n_press, double x, doub
     int img_w = gdk_paintable_get_intrinsic_width(paintable);
     int img_h = gdk_paintable_get_intrinsic_height(paintable);
 
-    // GtkAllocation alloc;
-    // gtk_widget_get_alocation(GTK_WIDGET(pic), &alloc);
-    graphene_rect_t bounds;
-    if (!gtk_widget_compute_bounds(GTK_WIDGET(pic), GTK_WIDGET(pic), &bounds)) {
-        // Fallback if it somehow fails
-        return;
-    }
-    double scale_x = (double)img_w / bounds.size.width;
-    double scale_y = (double)img_h / bounds.size.height;
-
-    int px = (int)(x * scale_x);
-    int py = (int)(y * scale_y);
-
+    ZoomState *img_zoom = g_object_get_data(G_OBJECT(pic), "zoom");
+    double scale = img_zoom ? img_zoom->scale : 1.0;
+    GtkWidget *viewport = gtk_widget_get_parent(GTK_WIDGET(pic));
+    GtkWidget *scrolled = gtk_widget_get_parent(viewport);
+    GtkAdjustment *hadj = gtk_scrolled_window_get_hadjustment(GTK_SCROLLED_WINDOW(scrolled));
+    GtkAdjustment *vadj = gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(scrolled));
+    double scroll_x = gtk_adjustment_get_value(hadj);
+    double scroll_y = gtk_adjustment_get_value(vadj);
+    // Picture widget size
+    int widget_w = gtk_widget_get_width(GTK_WIDGET(pic));
+    int widget_h = gtk_widget_get_height(GTK_WIDGET(pic));
+    int px = (int)((x - scroll_x) * img_w / widget_w);
+    int py = (int)((y - scroll_y) * img_h / widget_h);
+    px = CLAMP(px, 0, img_w - 1);
+    py = CLAMP(py, 0, img_h - 1);
+    g_print("click=(%f,%f) scroll=(%f,%f) scale=%f -> pixel=(%d,%d) img=(%d,%d)\n",
+            x, y, scroll_x, scroll_y, scale, px, py, img_w, img_h);
     GdkTexture *texture = g_object_get_data(G_OBJECT(pic), "texture");
     if (!texture) return;
     int channels = 4; // gdk_texture_download always uses RGBA
